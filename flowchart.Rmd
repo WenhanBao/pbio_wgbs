@@ -1,0 +1,58 @@
+---
+title: "Flowchart"
+author: "Wenhan Bao"
+date: "5/8/2023"
+output: html_document
+---
+
+---
+title: Flow Chart
+output: 
+  html_document:
+      code_folding: hide
+---
+
+```{r}
+library(DiagrammeR)
+
+# flowchart of sample size
+grViz(diagram = "digraph flowchart {
+  node [fontname = arial, shape = box]
+  tab1 [label = '@@1']
+  tab2 [label = '@@2']
+  tab3 [label = '@@3']
+  tab4 [label = '@@4']
+  tab5 [label = '@@5']
+  tab6 [label = '@@6']
+  tab7 [label = '@@7']
+  tab8 [label = '@@8']
+  tab9 [label = '@@9']
+  tab10 [label = '@@10']
+  tab11 [label = '@@11']
+  
+  tab1 -> tab2;
+  tab1 -> tab3;
+  tab3 -> tab4;
+  tab4 -> tab5;
+  tab5 -> tab6;
+  tab6 -> tab7;
+  tab7 -> tab8;
+  tab8 -> tab9;
+  tab9 -> tab10;
+  tab10 -> tab11;
+
+}
+  
+  [1]: 'Task 1:WGBS Data Processing'
+  [2]: 'Task 2:Principal Component Analysis'
+  [3]: 'Task 3:Merge chromosome and methylation info'
+  [4]: 'Task 4:Create a BSseq object'
+  [5]: 'Task 5:BSmooth the BSseq object'
+  [6]: 'Task 6:Loci selection'
+  [7]: 'Task 7:Compute t-statistics'
+  [8]: 'Task 8:Compute differentially methylated regions'
+  [9]: 'Task 9:DMRs selection'
+  [10]: 'Task 10:Label samples in the BSmooth Object'
+  [11]: 'Task 11:Plot the DMRs'
+  ")
+```
