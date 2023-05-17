@@ -1,0 +1,62 @@
+---
+title: "test_3"
+author: "Wenhan Bao"
+date: "5/16/2023"
+output: html_document
+---
+
+1
+
+```{r}
+# Loading the necessary library
+library(data.table)
+
+# Define the file IDs
+control_IDs <- c("GSM2877162", "GSM2877167", "GSM2877169")
+schizophrenia_IDs <- c("GSM2877163", "GSM2877164", "GSM2877165")
+
+# Combine all IDs
+all_IDs <- c(control_IDs, schizophrenia_IDs)
+
+# Initialize a list to store data frames
+df_list <- list()
+
+# Loop through all files
+for (id in all_IDs) {
+  # Read the file
+  temp <- fread(paste0("WGBS_data_control_sch/", id, ".txt"))
+  
+  # Rename columns
+  setnames(temp, c("V1", "V2", "V3", "V4"), c("chromosome", "position", "methylation", "coverage"))
+  
+  # Remove rows with zero coverage
+  temp <- temp[coverage != 0, ]
+  
+  # Calculate beta values
+  temp[, "beta_value" := methylation / coverage]
+  
+  # Set row names
+  rownames(temp) <- paste(temp$chromosome, temp$position, sep=":")
+  
+  # Select beta value column and rename it by the file ID
+  temp <- data.frame(temp[, .(beta_value)])
+  setnames(temp, "beta_value", substr(id, 1, 10))
+  
+  # Add to the list
+  df_list[[id]] <- temp
+}
+
+# Find the common row names among all data frames
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset data frames by common row names
+df_list <- lapply(df_list, function(df) df[rownames(df) %in% common_rows, ])
+
+# Combine all data frames by row names
+final_df <- do.call(cbind, df_list)
+
+# Print first 10 rows
+print(head(final_df, 10))
+
+```
+

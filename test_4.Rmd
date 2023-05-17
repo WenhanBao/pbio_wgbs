@@ -1,0 +1,318 @@
+---
+title: "test_4"
+author: "Wenhan Bao"
+date: "5/16/2023"
+output: html_document
+---
+
+1:
+
+```{r}
+# Load necessary libraries
+library(data.table)
+library(dplyr)
+
+# Define the IDs for each group
+control_ids <- c("GSM2877162", "GSM2877167", "GSM2877169")
+sch_ids <- c("GSM2877163", "GSM2877164", "GSM2877165")
+
+# Combine all IDs
+all_ids <- c(control_ids, sch_ids)
+
+# Define the directory where the files are stored
+data_dir <- "WGBS_data_control_sch"
+
+# Initialize an empty list to store data frames
+df_list <- list()
+
+# Loop through all IDs
+for (id in all_ids) {
+  # Read the data
+  df <- fread(paste0(data_dir, "/", id, ".txt"))
+  
+  # Convert data to data.frame
+  df <- as.data.frame(df)
+  
+  # Rename the columns
+  colnames(df) <- c("chromosome", "position", "methylation", "coverage")
+  
+  # Remove rows with zero coverage
+  df <- df[df$coverage != 0,]
+  
+  # Create new beta value column
+  df$beta <- df$methylation / df$coverage
+  
+  # Set row names
+  rownames(df) <- paste(df$chromosome, df$position, sep = " : ")
+  
+  # Rename the beta value column by the file name
+  colnames(df)[which(names(df) == "beta")] <- substr(id, 1, 10)
+  
+  # Only select the beta value column
+  df <- select(df, starts_with(substr(id, 1, 10)))
+  
+  # Add the data frame to the list
+  df_list[[id]] <- df
+}
+
+# Find the common row names across all data frames
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset all data frames to only include the common rows
+df_list <- lapply(df_list, function(df) df[rownames(df) %in% common_rows,])
+
+# Combine all data frames by row name
+combined_df <- do.call(cbind, df_list)
+
+# Print the first 10 rows
+head(combined_df, 10)
+
+```
+
+2
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Step 1: Transpose and filter columns
+transposed_df <- as.data.frame(t(combined_df))
+transposed_df <- transposed_df[, colSums(transposed_df != 0) > 0]
+
+# Step 2: Mean, standard deviation, and linear model
+column_means <- colMeans(transposed_df)
+column_sd <- apply(transposed_df, 2, sd)
+lm_model <- lm(column_sd ~ column_means)
+residuals <- resid(lm_model)
+
+# Retain columns with positive residuals
+filtered_df <- transposed_df[, residuals > 0]
+
+# If more than 5,000 columns with positive residuals, keep top 5,000
+if (ncol(filtered_df) > 5000) {
+  top_5000 <- order(residuals[residuals > 0], decreasing = TRUE)[1:5000]
+  filtered_df <- filtered_df[, top_5000]
+}
+
+# Step 3: PCA and ggplot2
+pca <- prcomp(filtered_df, scale. = TRUE)
+pca_df <- as.data.frame(pca$x[, 1:2])
+colnames(pca_df) <- c("PC1", "PC2")
+pca_df$group <- ifelse(rownames(pca_df) %in% control_ids, "Control", "Schizophrenia")
+
+# Plot the PCA results
+ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
+  geom_point(size = 3, alpha = 0.7) +
+  scale_color_manual(values = c("Control" = "yellow", "Schizophrenia" = "blue")) +
+  labs(title = "Principal Component Analysis") +
+  theme_minimal()
+
+```
+
+3:
+
+```{r}
+# Load necessary library
+library(data.table)
+
+# Define the IDs for each group
+control_ids <- c("GSM2877162", "GSM2877167", "GSM2877169")
+sch_ids <- c("GSM2877163", "GSM2877164", "GSM2877165")
+
+# Combine all IDs
+all_ids <- c(control_ids, sch_ids)
+
+# Define the directory where the files are stored
+data_dir <- "WGBS_data_control_sch"
+
+# Initialize lists to store data frames
+df_list <- list()
+
+# Loop through all IDs
+for (id in all_ids) {
+  # Read the data
+  df <- fread(paste0(data_dir, "/", id, ".txt"))
+  
+  # Convert data to data.frame
+  df <- as.data.frame(df)
+  
+  # Rename the columns
+  colnames(df) <- c("chromosome", "position", "methylation", "coverage")
+  
+  # Remove rows with zero coverage
+  df <- df[df$coverage != 0,]
+  
+  # Set row names
+  rownames(df) <- paste(df$chromosome, df$position, sep = " : ")
+  
+  # Add the data frame to the list
+  df_list[[id]] <- df
+}
+
+# Find the common row names across all data frames
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset all data frames to only include the common rows
+df_list <- lapply(df_list, function(df) df[rownames(df) %in% common_rows,])
+
+# Step 2: Generate matrices for coverage and methylation info, and vectors for position and chromosome info and sample names
+
+# Initialize matrices
+coverage_matrix <- matrix(, nrow = length(common_rows), ncol = length(all_ids))
+methylation_matrix <- matrix(, nrow = length(common_rows), ncol = length(all_ids))
+
+# Initialize vectors
+position_vector <- vector(mode = "numeric", length = length(common_rows))
+chromosome_vector <- vector(mode = "character", length = length(common_rows))
+sample_names_vector <- vector(mode = "character", length = length(all_ids))
+
+# Fill matrices and vectors
+for (i in seq_along(all_ids)) {
+  coverage_matrix[,i] <- df_list[[all_ids[i]]]$coverage
+  methylation_matrix[,i] <- df_list[[all_ids[i]]]$methylation
+  position_vector <- df_list[[all_ids[i]]]$position
+  chromosome_vector <- df_list[[all_ids[i]]]$chromosome
+  sample_names_vector[i] <- substr(all_ids[i], 1, 10)
+}
+
+# Set row names and column names for the matrices
+rownames(coverage_matrix) <- common_rows
+colnames(coverage_matrix) <- sample_names_vector
+rownames(methylation_matrix) <- common_rows
+colnames(methylation_matrix) <- sample_names_vector
+
+```
+
+4
+
+```{r}
+# If you haven't installed the BSseq package, do it with the following command:
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+#   install.packages("BiocManager")
+# BiocManager::install("BSseq")
+
+# Load the BSseq library
+library(bsseq)
+
+# Create the BSseq object
+BSseq_obj <- BSseq(chr = chromosome_vector,
+                   pos = position_vector,
+                   M = methylation_matrix,
+                   Cov = coverage_matrix,
+                   sampleNames = sample_names_vector)
+
+# Print the BSseq object
+print(BSseq_obj)
+
+```
+
+5
+
+```{r}
+# Apply BSmooth to the BSseq object
+BSseq_smoothed <- BSmooth(BSseq_obj)
+
+# Print the smoothed BSseq object
+print(BSseq_smoothed)
+
+```
+
+6
+
+```{r}
+# Get the coverage of the BSseq object
+coverage <- getCoverage(BSseq_smoothed)
+
+# Get the index of samples in each group
+control_index <- which(colnames(coverage) %in% substr(control_ids, 1, 10))
+sch_index <- which(colnames(coverage) %in% substr(sch_ids, 1, 10))
+
+# Find the loci that fulfill the coverage criteria for both groups
+control_loci <- which(rowSums(coverage[, control_index] >= 2) >= 2)
+sch_loci <- which(rowSums(coverage[, sch_index] >= 2) >= 2)
+selected_loci <- intersect(control_loci, sch_loci)
+
+# Print the number of loci that fulfill the criteria
+print(length(selected_loci))
+
+# Subset the BSseq object to keep only the selected loci
+BSseq_smoothed_filtered <- BSseq_smoothed[selected_loci]
+
+# Print the filtered BSseq object
+print(BSseq_smoothed_filtered)
+
+```
+
+7
+
+```{r}
+# Define the group labels
+group1_samples <- substr(sch_ids, 1, 10)
+group2_samples <- substr(control_ids, 1, 10)
+
+# Compute the t-statistics
+tstats <- BSmooth.tstat(BSseq = BSseq_smoothed_filtered, 
+                        group1 = group1_samples, 
+                        group2 = group2_samples, 
+                        estimate.var = "group2",
+                        local.correct = TRUE)
+
+# Print the t-statistics
+print(tstats)
+
+```
+
+8
+
+```{r}
+# Compute differentially methylated regions (DMRs)
+DMRs <- dmrFinder(tstats, cutoff = c(-1, 1))
+
+# Print the DMRs
+print(DMRs)
+```
+
+9
+
+```{r}
+# Filter DMRs
+filtered_DMRs <- subset(DMRs, n >= 3 & abs(meanDiff) >= 0.1)
+
+# Print the filtered DMRs
+print(filtered_DMRs)
+```
+
+10
+
+```{r}
+# Create a data frame
+df <- data.frame(sampleNames = sampleNames(BSseq_smoothed_filtered))
+
+# Add a color column
+df$col <- ifelse(df$sampleNames %in% substr(sch_ids, 1, 10), "blue", "red")
+
+# Set row names
+rownames(df) <- df$sampleNames
+
+# Set the data frame as the pData of the BSseq object
+pData(BSseq_smoothed_filtered) <- df
+
+# Print the pData of the BSseq object
+print(pData(BSseq_smoothed_filtered))
+
+# Order DMRs by absolute value of meanDiff
+ordered_DMRs <- filtered_DMRs[order(abs(filtered_DMRs$meanDiff), decreasing = TRUE), ]
+
+# Select top 5 DMRs
+top5_DMRs <- head(ordered_DMRs, 5)
+
+# Plot the top 5 DMRs
+plotManyRegions(BSseq = BSseq_smoothed_filtered, 
+                regions = top5_DMRs, 
+                extend = 5000, 
+                addRegions = filtered_DMRs, 
+                main = "Identify differentially methylated regions")
+```
+
+

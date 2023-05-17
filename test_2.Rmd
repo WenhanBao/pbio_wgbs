@@ -1,0 +1,317 @@
+---
+title: "Test_2"
+author: "Wenhan Bao"
+date: "5/16/2023"
+output: html_document
+---
+
+Task 1:
+
+```{r}
+# Required library
+library(data.table)
+
+# Define the sample IDs
+control_ids <- c("GSM2877162", "GSM2877167", "GSM2877169")
+schizophrenia_ids <- c("GSM2877163", "GSM2877164", "GSM2877165")
+
+# Combine the IDs
+all_ids <- c(control_ids, schizophrenia_ids)
+
+# Initialize an empty list to store data frames
+df_list <- list()
+
+# Loop over all IDs
+for(i in 1:length(all_ids)){
+  # Read the .txt file
+  df <- fread(paste0("WGBS_data_control_sch/", all_ids[i], ".txt"))
+  
+  # Convert to data frame
+  df <- as.data.frame(df)
+  
+  # Rename the columns
+  names(df) <- c("chromosome_info", "position_info", "methylation_info", "coverage_info")
+  
+  # Remove rows with zero coverage info
+  df <- df[df$coverage_info != 0,]
+  
+  # Create a new beta value column
+  df$beta_value <- df$methylation_info / df$coverage_info
+  
+  # Set the row name
+  rownames(df) <- paste(df$chromosome_info, df$position_info, sep=":")
+  
+  # Rename the beta value column by the file name (first 10 strings)
+  colnames(df)[which(names(df) == "beta_value")] <- substr(all_ids[i], 1, 10)
+  
+  # Only select the beta value column
+  df <- df[ , substr(all_ids[i], 1, 10), drop = FALSE]
+  
+  # Add to the list
+  df_list[[i]] <- df
+}
+
+# Find common row names
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset dataframes by common row names
+df_list <- lapply(df_list, function(x) x[rownames(x) %in% common_rows,])
+
+# Combine all data frames by row name
+final_df <- do.call(cbind, df_list)
+
+# Add back the row names and column names
+rownames(final_df) <- common_rows
+colnames(final_df) <- all_ids
+
+# Print first 10 rows
+print(head(final_df, 10))
+```
+
+Task 2:
+
+```{r}
+library(ggplot2)
+
+# Step 1
+transposed_df <- t(final_df)
+transposed_df <- transposed_df[ , colSums(transposed_df != 0) > 0]
+
+# Step 2
+mean_values <- colMeans(transposed_df)
+sd_values <- apply(transposed_df, 2, sd)
+model_fit <- lm(sd_values ~ mean_values)
+residuals <- resid(model_fit)
+transposed_df <- transposed_df[ , residuals > 0]
+
+# If more than 5000 columns with positive residual, only retain 5000 with higher residual
+if(ncol(transposed_df) > 5000){
+  transposed_df <- transposed_df[ , order(residuals, decreasing = TRUE)[1:5000]]
+}
+
+# Step 3
+scaled_df <- scale(transposed_df)
+pca_results <- prcomp(scaled_df)
+
+# Define the color for the groups
+group_colors <- ifelse(rownames(scaled_df) %in% control_ids, "Control", "Schizophrenia")
+
+# Plot
+ggplot(as.data.frame(pca_results$x[, 1:2]), aes(x = PC1, y = PC2, color = group_colors)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Control" = "yellow", "Schizophrenia" = "blue")) +
+  labs(title = "Principal component analysis", color = "Group") +
+  theme_minimal()
+```
+
+Task 3:
+
+```{r}
+# Step 1
+# Define the sample IDs
+control_ids <- c("GSM2877162", "GSM2877167", "GSM2877169")
+schizophrenia_ids <- c("GSM2877163", "GSM2877164", "GSM2877165")
+
+# Combine the IDs
+all_ids <- c(control_ids, schizophrenia_ids)
+
+# Initialize lists to store data frames
+df_list <- list()
+
+# Loop over all IDs
+for(i in 1:length(all_ids)){
+  # Read the .txt file
+  df <- data.table::fread(paste0("WGBS_data_control_sch/", all_ids[i], ".txt"))
+  
+  # Convert to data frame
+  df <- as.data.frame(df)
+  
+  # Rename the columns
+  names(df) <- c("chromosome_info", "position_info", "methylation_info", "coverage_info")
+  
+  # Remove rows with zero coverage info
+  df <- df[df$coverage_info != 0,]
+  
+  # Set the row name
+  rownames(df) <- paste(df$chromosome_info, df$position_info, sep=":")
+  
+  # Add to the list
+  df_list[[i]] <- df
+}
+
+# Find common row names
+common_rows <- Reduce(intersect, lapply(df_list, rownames))
+
+# Subset data frames by common row names
+df_list <- lapply(df_list, function(x) x[rownames(x) %in% common_rows,])
+
+# Step 2
+# Initialize lists to store coverage info and methylation info
+coverage_list <- list()
+methylation_list <- list()
+
+# Initialize vectors to store position info, chromosome info, and sample names
+position_vec <- NULL
+chromosome_vec <- NULL
+sample_names <- NULL
+
+# Loop over all data frames
+for(i in 1:length(df_list)){
+  # Add coverage info and methylation info to the lists
+  coverage_list[[i]] <- df_list[[i]]$coverage_info
+  methylation_list[[i]] <- df_list[[i]]$methylation_info
+  
+  # Add position info, chromosome info, and sample name to the vectors
+  if(i == 1){
+    position_vec <- df_list[[i]]$position_info
+    chromosome_vec <- df_list[[i]]$chromosome_info
+  }
+  sample_names <- c(sample_names, substr(all_ids[i], 1, 10))
+}
+
+# Convert lists to matrices
+coverage_matrix <- do.call(cbind, coverage_list)
+methylation_matrix <- do.call(cbind, methylation_list)
+
+# Rename columns of matrices with sample names
+colnames(coverage_matrix) <- sample_names
+colnames(methylation_matrix) <- sample_names
+```
+
+
+Task 4:
+
+```{r}
+gr <- GRanges(seqnames = chromosome_vec, ranges = IRanges(start = position_vec))
+
+# Create a BSseq object
+bsseq_data <- BSseq(M = methylation_matrix,
+                    Cov = coverage_matrix,
+                    gr = gr,
+                    sampleNames = sample_names)
+```
+
+Task 5:
+
+```{r}
+# Load the bsseq library
+library(bsseq)
+
+# Run BSmooth on the BSseq object
+bsseq_smoothed <- BSmooth(bsseq_data)
+```
+
+Task 6:
+
+```{r}
+# Load the bsseq library
+library(bsseq)
+
+# Get the coverage from the BSmooth normalized BSseq object
+coverage <- getCoverage(bsseq_smoothed)
+
+# Define the groups
+control_group <- c("GSM2877162", "GSM2877167", "GSM2877169")
+schizophrenia_group <- c("GSM2877163", "GSM2877164", "GSM2877165")
+
+# Identify the loci that fulfill the coverage criteria for both groups
+control_indices <- which(rowSums(coverage[, control_group] >= 2) >= 2)
+schizophrenia_indices <- which(rowSums(coverage[, schizophrenia_group] >= 2) >= 2)
+
+# Get the common indices
+common_indices <- intersect(control_indices, schizophrenia_indices)
+
+# Print the number of loci that fulfill the criteria
+print(length(common_indices))
+
+# Subset the BSmooth normalized BSseq object to keep only the selected loci
+bsseq_filtered <- bsseq_smoothed[common_indices, ]
+
+# Print the filtered BSmooth normalized BSseq object
+print(bsseq_filtered)
+
+```
+
+
+Task 7:
+
+```{r}
+# Load the bsseq library
+library(bsseq)
+
+# Define the groups
+group1 <- c("GSM2877163", "GSM2877164", "GSM2877165")  # schizophrenia samples
+group2 <- c("GSM2877162", "GSM2877167", "GSM2877169")  # control samples
+
+# Compute the t-statistics
+tstat_result <- BSmooth.tstat(bsseq_filtered, 
+                              group1 = group1, 
+                              group2 = group2, 
+                              estimate.var = "group2",
+                              local.correct = TRUE)
+
+# Print the t-statistics result
+print(tstat_result)
+
+```
+
+
+Task 8:
+
+```{r}
+# Load the bsseq library
+library(bsseq)
+
+# Compute DMRs
+dmrs <- dmrFinder(tstat_result, cutoff = c(-1, 1))
+
+# Print the DMRs
+print(dmrs)
+
+```
+
+Task 9:
+
+```{r}
+# Load the bsseq library
+library(bsseq)
+
+# Filter DMRs
+filtered_dmrs <- subset(dmrs, n >= 3 & abs(meanDiff) >= 0.1)
+
+# Print the filtered DMRs
+print(filtered_dmrs)
+```
+
+Task 10:
+
+```{r}
+# Load the bsseq library
+library(bsseq)
+
+# Create a new data frame
+pdata <- data.frame(col = rep(NA, length(sampleNames(bsseq_filtered))))
+
+# Set the row names as sample names
+rownames(pdata) <- sampleNames(bsseq_filtered)
+
+# Assign colors to the groups
+pdata$col[rownames(pdata) %in% c("GSM2877162", "GSM2877167", "GSM2877169")] <- "red" # control group
+pdata$col[rownames(pdata) %in% c("GSM2877163", "GSM2877164", "GSM2877165")] <- "blue" # schizophrenia group
+
+# Set this data frame as the pData of the filtered BSmooth object
+pData(bsseq_filtered) <- pdata
+
+library(bsseq)
+
+# Select the top 5 DMRs based on the absolute value of the mean difference
+top_dmrs <- head(filtered_dmrs[order(abs(filtered_dmrs$meanDiff), decreasing = TRUE),], 5)
+
+# Plot the DMRs
+plotManyRegions(bsseq_filtered, 
+                regions = top_dmrs,
+                addRegions = filtered_dmrs,
+                extend = 5000, 
+                main = "Identify differentially methylated regions")
+```
+
