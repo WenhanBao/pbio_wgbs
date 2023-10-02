@@ -1,0 +1,104 @@
+---
+title: "Test_4"
+author: "Wenhan Bao"
+date: "10/1/2023"
+output: html_document
+---
+
+## T1
+
+```{r}
+# Load necessary library
+library(data.table)
+
+# Define a function to process each file
+process_file <- function(file_path) {
+  data <- fread(file_path, header = TRUE)
+  setnames(data, c("chr", "pos", "meth", "cov"))
+  data$beta <- data$meth / data$cov
+  row.names(data) <- paste(data$chr, data$pos, sep = ":")
+  return(data$beta)
+}
+
+# List all files in the directory
+files <- list.files("WGBS_data_control_sch", pattern = "*.txt", full.names = TRUE)
+
+# Apply the function to all files and combine them into a matrix
+combined_data <- do.call(cbind, lapply(files, process_file))
+
+# Set the column names as the original file names without extension
+colnames(combined_data) <- gsub("\\.txt$", "", basename(files))
+
+# Remove rows with any NA values
+combined_data <- combined_data[complete.cases(combined_data), ]
+
+```
+
+## T2
+
+```{r}
+# Load the necessary library
+library(ggplot2)
+
+# Step 1
+trans_combined_data <- t(combined_data)
+trans_combined_data <- trans_combined_data[, colSums(trans_combined_data != 0) > 0]
+
+# Step 2
+column_means <- colMeans(trans_combined_data)
+column_sd <- apply(trans_combined_data, 2, sd)
+lm_model <- lm(column_sd ~ column_means)
+residuals <- resid(lm_model)
+columns_to_keep <- names(residuals[residuals > 0])
+
+# If there are more than 5,000 columns with positive residuals, only keep 5,000 with higher residuals
+if(length(columns_to_keep) > 5000) {
+  columns_to_keep <- names(sort(residuals, decreasing = TRUE)[1:5000])
+}
+
+filtered_data <- trans_combined_data[, columns_to_keep, drop = FALSE]
+
+# Step 3
+pca_result <- prcomp(filtered_data, scale. = TRUE)
+pca_data <- as.data.frame(pca_result$x[, 1:2])
+pca_data$group <- ifelse(row.names(pca_data) %in% c("GSM2877162", "GSM2877167", "GSM2877169"), "Control", "Schizophrenia")
+
+# Plot the PCA result
+ggplot(pca_data, aes(PC1, PC2, color = group)) +
+  geom_point() +
+  scale_color_manual(values = c("Control" = "orange", "Schizophrenia" = "blue")) +
+  ggtitle("Principal component analysis")
+
+```
+
+## t3
+
+```{r}
+# Define a function to process each file
+process_file <- function(file_path) {
+  data <- fread(file_path, header = TRUE)
+  setnames(data, c("chr", "pos", "meth", "cov"))
+  data <- data[data$cov != 0, ]
+  row.names(data) <- paste(data$chr, data$pos, sep = ":")
+  return(data)
+}
+
+# List all files in the directory
+files <- list.files("WGBS_data_control_sch", pattern = "*.txt", full.names = TRUE)
+
+# Apply the function to all files
+processed_data <- lapply(files, process_file)
+
+# Keep only the common rows
+common_rows <- Reduce(intersect, lapply(processed_data, row.names))
+processed_data <- lapply(processed_data, function(x) x[common_rows, ])
+
+# Step 2: Generate matrices and vectors
+coverage_matrix <- do.call(cbind, lapply(processed_data, function(x) x$cov))
+methylation_matrix <- do.call(cbind, lapply(processed_data, function(x) x$meth))
+position_vector <- processed_data[[1]]$pos
+chromosome_vector <- processed_data[[1]]$chr
+sample_name_vector <- substr(basename(files), 1, 10)
+
+```
+

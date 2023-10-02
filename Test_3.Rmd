@@ -1,0 +1,45 @@
+---
+title: "Test_3"
+author: "Wenhan Bao"
+date: "10/1/2023"
+output: html_document
+---
+
+## T1
+
+```{r}
+# Load necessary library
+library(data.table)
+
+# Function to process files
+process_files <- function(filename) {
+  data <- fread(paste0("WGBS_data_control_sch/", filename), header = TRUE)
+  colnames(data) <- c("chromosome", "position", "methylation", "coverage")
+  data$beta_value <- data$methylation / data$coverage
+  data$row_names <- paste(data$chromosome, data$position, sep = ":")
+  return(data[, .(row_names, beta_value)])
+}
+
+# List all files in the directory
+files <- list.files("WGBS_data_control_sch", pattern = "\\.txt$")
+
+# Apply the function to all files
+all_data <- lapply(files, process_files)
+
+# Combine the data
+combined_data <- Reduce(function(x, y) {
+  merge(x, y, by = "row_names", all = TRUE)
+}, all_data)
+
+# Set row names and remove the row_names column
+rownames(combined_data) <- combined_data$row_names
+combined_data <- combined_data[, -1]
+
+# Update column names to original file names without extension
+colnames(combined_data) <- sub("\\.txt$", "", files)
+
+# Filter rows without any missing values
+combined_data <- combined_data[complete.cases(combined_data), ]
+
+```
+

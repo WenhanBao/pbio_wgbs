@@ -1,0 +1,40 @@
+---
+title: "Test_8"
+author: "Wenhan Bao"
+date: "10/1/2023"
+output: html_document
+---
+
+```{r}
+# Load the data.table library
+library(data.table)
+
+# Function to process each file
+process_file <- function(file_path) {
+  # Reading the WGBS data
+  data <- fread(file_path, header = TRUE)
+  
+  # Calculating beta values
+  data$beta <- data$V3 / data$V4
+  
+  # Creating row names
+  rownames(data) <- paste(data$V1, data$V2, sep = ":")
+  
+  # Returning beta values as data.table with filename as name
+  setnames(data[, .(beta)], sub("\\.txt$", "", basename(file_path)))
+}
+
+# Directory containing the WGBS data
+dir_path <- "WGBS_data_control_sch"
+
+# Listing all txt files in the directory
+file_paths <- list.files(dir_path, pattern = "\\.txt$", full.names = TRUE)
+
+# Processing all files and combining the data
+combined_data <- do.call(cbind, lapply(file_paths, process_file))
+
+# Removing rows with any NAs
+combined_data <- combined_data[complete.cases(combined_data), ]
+
+```
+

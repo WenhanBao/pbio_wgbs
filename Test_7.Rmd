@@ -1,0 +1,205 @@
+---
+title: "Test_7"
+author: "Wenhan Bao"
+date: "10/1/2023"
+output: html_document
+---
+
+```{r}
+library(data.table)
+
+# Function to process each file
+processFile <- function(file) {
+  data <- fread(file, header = TRUE)  # Read file
+  setnames(data, c("chr", "pos", "meth", "coverage"))  # Rename columns
+  beta <- data[, .(pos = paste(chr, pos, sep=":"), beta = meth / coverage)]  # Calculate beta values
+  setnames(beta, c("pos", sub("\\.txt$", "", basename(file))))  # Rename beta column
+  return(beta)
+}
+
+# List all files in the directory
+files <- list.files("WGBS_data_control_sch", pattern = "*.txt", full.names = TRUE)
+
+# Process all files and combine
+combined_data <- Reduce(function(...) merge(..., by="pos", all = TRUE), lapply(files, processFile))
+
+# Remove rows with NA
+combined_data <- combined_data[complete.cases(combined_data), ]
+
+# Set the first column as row names
+rownames(combined_data) <- combined_data$pos
+# Remove the first column
+combined_data <- combined_data[, -1]
+
+```
+
+```{r}
+library(ggplot2)
+
+# Step 1: Transpose the combined_data and filter out columns with all zeros
+trans_combined_data <- t(combined_data)
+trans_combined_data <- trans_combined_data[, colSums(trans_combined_data != 0) > 0]
+
+# Step 2: Perform operations based on columns
+mean_vals <- colMeans(trans_combined_data)
+sd_vals <- apply(trans_combined_data, 2, sd)
+model <- lm(sd_vals ~ mean_vals)
+residuals <- resid(model)
+selected_columns <- which(residuals > 0)
+if (length(selected_columns) > 5000) selected_columns <- head(order(residuals[selected_columns], decreasing = TRUE), 5000)
+filtered_data <- trans_combined_data[, selected_columns]
+
+# Step 3: Conduct PCA and plot using ggplot2
+pca_result <- prcomp(filtered_data, scale. = TRUE)
+pca_df <- as.data.frame(pca_result$x[, 1:2])
+pca_df$group <- ifelse(rownames(pca_df) %in% c("GSM2877162", "GSM2877167", "GSM2877169"), "Control", "Schizophrenia")
+
+# Plot PCA
+ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Control" = "orange", "Schizophrenia" = "blue")) +
+  ggtitle("Principal component analysis") +
+  theme_minimal()
+
+```
+
+```{r}
+library(data.table)
+
+# Step 1: Re-read and process the data sets
+processFile <- function(file) {
+  data <- fread(file, header = TRUE)
+  setnames(data, c("chr", "pos", "meth", "coverage")) 
+  data <- data[data$coverage != 0, ]
+  rownames(data) <- paste(data$chr, data$pos, sep=":")
+  return(data)
+}
+
+files <- list.files("WGBS_data_control_sch", pattern = "*.txt", full.names = TRUE)
+list_data <- lapply(files, processFile)
+
+# Only keep the common row names among those data frames
+common_rows <- Reduce(intersect, lapply(list_data, rownames))
+list_data <- lapply(list_data, function(x) x[rownames(x) %in% common_rows, ])
+
+# Step 2: Generate matrices and vectors
+coverage_matrix <- do.call(cbind, lapply(list_data, function(x) x$coverage))
+rownames(coverage_matrix) <- common_rows
+
+methylation_matrix <- do.call(cbind, lapply(list_data, function(x) x$meth))
+rownames(methylation_matrix) <- common_rows
+
+position_vector <- as.numeric(sapply(strsplit(common_rows, ":"), `[`, 2))
+chromosome_vector <- sapply(strsplit(common_rows, ":"), `[`, 1)
+sample_name_vector <- sapply(files, function(x) substr(basename(x), 1, 10))
+
+```
+
+```{r}
+# Load the necessary library
+library(bsseq)
+
+# Task 4: Create a 'bsseq' object
+bsseq_obj <- BSseq(
+  M = methylation_matrix,
+  Cov = coverage_matrix,
+  chr = chromosome_vector,
+  pos = position_vector,
+  sampleNames = sample_name_vector
+)
+
+
+# Check the bsseq object
+bsseq_obj
+```
+
+
+```{r}
+# Task 5: BSmooth the BSseq object
+# Perform BSmooth on the bsseq object
+bsseq_smoothed <- BSmooth(bsseq_obj)
+
+```
+
+```{r}
+# Obtain the coverage from the BSmooth normalized BSseq object
+coverage_bsseq_smoothed <- getCoverage(bsseq_smoothed)
+
+# Identify loci that fulfill the coverage criteria for both groups
+control_samples <- c("GSM2877162", "GSM2877167", "GSM2877169")  # Control sample names
+schizophrenia_samples <- c("GSM2877163", "GSM2877164", "GSM2877165")  # Schizophrenia sample names
+
+control_coverage <- coverage_bsseq_smoothed[, sample_name_vector %in% control_samples]
+schizophrenia_coverage <- coverage_bsseq_smoothed[, sample_name_vector %in% schizophrenia_samples]
+
+control_criteria <- rowSums(control_coverage >= 2) >= 2
+schizophrenia_criteria <- rowSums(schizophrenia_coverage >= 2) >= 2
+
+selected_loci <- which(control_criteria & schizophrenia_criteria)
+
+# Print the number of loci that fulfill the criteria
+print(length(selected_loci))
+
+# Subset the BSmooth normalized BSseq object to keep only the selected loci
+filtered_bsseq_smoothed <- bsseq_smoothed[selected_loci, ]
+
+# Print the filtered BSmooth normalized BSseq object
+filtered_bsseq_smoothed
+
+```
+
+```{r}
+# Compute t-statistics
+t_stats <- BSmooth.tstat(
+  BSseq = filtered_bsseq_smoothed,
+  group1 = schizophrenia_samples,
+  group2 = control_samples,
+  estimate.var = "group2",
+  local.correct = TRUE
+)
+
+```
+
+```{r}
+# Compute differentially methylated regions (DMRs)
+dmrs <- dmrFinder(
+  t_stats,
+  cutoff = c(-1, 1)
+)
+
+```
+
+```{r}
+# Filter out DMRs
+filtered_dmrs <- subset(
+  dmrs, 
+  n >= 3 & abs(meanDiff) >= 0.1
+)
+
+```
+
+```{r}
+# Create a data frame
+pData_df <- data.frame(
+  col = c(rep("red", length(control_samples)), rep("blue", length(schizophrenia_samples))),
+  row.names = sampleNames(filtered_bsseq_smoothed)
+)
+
+# Set the data frame as the pData of filtered BSmooth object
+pData(filtered_bsseq_smoothed) <- pData_df
+
+# Order the DMRs by the absolute value of meanDiff and select the top 5
+ordered_dmrs <- filtered_dmrs[order(abs(filtered_dmrs$meanDiff), decreasing = TRUE), ]
+top_dmrs <- head(ordered_dmrs, 5)
+
+# Plot the DMRs
+plotManyRegions(
+  BSseq = filtered_bsseq_smoothed, 
+  addRegions = filtered_dmrs, 
+  regions = top_dmrs, 
+  extend = 5000, 
+  main = "Identify differentially methylated regions"
+)
+
+```
+
